@@ -135,7 +135,7 @@ func readConfig(path string) (*Options, error) {
 	return options, nil
 }
 
-func JoinIPPort(ip string, port int) (string, error) {
+func JoinIPPort[T int | uint16](ip string, port T) (string, error) {
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return "", fmt.Errorf("invalid IP address")
@@ -160,10 +160,18 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
 			} else {
-				fmt.Println(answer)
 				for _, ans := range answer.Answer {
 					record := getDNSRecord(ans)
 					msg.Answer = append(msg.Answer, record)
+				}
+			}
+		case dns.TypeMX:
+			answer, err := queryRawDNS(options, q.Name)
+			if err != nil {
+				msg.Rcode = dns.RcodeServerFailure
+			} else {
+				for _, ans := range answer.Answer {
+					msg.Answer = append(msg.Answer, ans)
 				}
 			}
 		}
@@ -172,11 +180,33 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(&msg)
 }
 
+func queryRawDNS(options *Options, name string) (*dns.Msg, error) {
+	dnsClient := new(dns.Client)
+
+	msg := new(dns.Msg)
+	msg.SetQuestion(dns.Fqdn(name), dns.TypeMX)
+	msg.RecursionDesired = true
+
+	serverAddress, err := JoinIPPort(options.Server.Address, options.Server.UDPPort)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := dnsClient.Exchange(msg, serverAddress)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to exchange: %v", err)
+	}
+
+	if r.Rcode != dns.RcodeSuccess {
+		return nil, fmt.Errorf("Query failed: %s", dns.RcodeToString[r.Rcode])
+	}
+	return r, nil
+}
+
 func queryHTTPDNS(options *Options, name string, qtype string) (*DNSEntity, error) {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	key := sha256.Sum256([]byte(options.API.AccountID + options.API.AccessKeySecret + ts + name + options.API.AccessKeyID))
 	keyStr := hex.EncodeToString(key[:])
-	url := fmt.Sprintf("http://%s/resolve?name=%s&type=%s&uid=%s&ak=%s&key=%s&ts=%s", options.Server, name, qtype, options.API.AccountID, options.API.AccessKeyID, keyStr, ts)
+	url := fmt.Sprintf("http://%s/resolve?name=%s&type=%s&uid=%s&ak=%s&key=%s&ts=%s", options.Server.Address, name, qtype, options.API.AccountID, options.API.AccessKeyID, keyStr, ts)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -223,7 +253,8 @@ func getDNSRecord(ans Answer) dns.RR {
 	default:
 		rr := new(dns.TXT)
 		rr.Hdr = header
-		rr.Txt = []string{ans.Data}
+		cleanedData := strings.Trim(ans.Data, "\"") // 去掉引号
+		rr.Txt = []string{cleanedData}
 		return rr
 	}
 }
