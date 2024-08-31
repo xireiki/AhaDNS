@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"strconv"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -155,23 +156,15 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 
 	for _, q := range r.Question {
 		switch q.Qtype {
-		case dns.TypeA, dns.TypeAAAA, dns.TypeCNAME, dns.TypeNS, dns.TypeTXT:
+		case dns.TypeA, dns.TypeAAAA, dns.TypeCNAME, dns.TypeNS, dns.TypeTXT, dns.TypeMX, dns.TypeCAA:
 			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String())
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
+				fmt.Println(err)
 			} else {
 				for _, ans := range answer.Answer {
 					record := getDNSRecord(ans)
 					msg.Answer = append(msg.Answer, record)
-				}
-			}
-		case dns.TypeMX:
-			answer, err := queryRawDNS(options, q.Name)
-			if err != nil {
-				msg.Rcode = dns.RcodeServerFailure
-			} else {
-				for _, ans := range answer.Answer {
-					msg.Answer = append(msg.Answer, ans)
 				}
 			}
 		}
@@ -229,31 +222,48 @@ func getDNSRecord(ans Answer) dns.RR {
 		rr.Hdr = header
 		rr.A = net.ParseIP(ans.Data)
 		return rr
-	case 28: // AAAA
-		rr := new(dns.AAAA)
+	case 2: // NS
+		rr := new(dns.NS)
 		rr.Hdr = header
-		rr.AAAA = net.ParseIP(ans.Data)
+		rr.Ns = ans.Data
 		return rr
 	case 5: // CNAME
 		rr := new(dns.CNAME)
 		rr.Hdr = header
 		rr.Target = ans.Data
 		return rr
-	case 2: // NS
-		rr := new(dns.NS)
+	case 15: // MX
+		rr := new(dns.MX)
 		rr.Hdr = header
-		rr.Ns = ans.Data
+		data := strings.Split(ans.Data, " ")
+		pref, _ := strconv.ParseUint(data[0], 10, 16)
+		rr.Preference = uint16(pref)
+		rr.Mx = data[1]
 		return rr
 	case 16: // TXT
 		rr := new(dns.TXT)
 		rr.Hdr = header
-		cleanedData := strings.Trim(ans.Data, "\"") // 去掉引号
+		cleanedData := strings.Trim(ans.Data, "\"")
 		rr.Txt = []string{cleanedData}
+		return rr
+	case 28: // AAAA
+		rr := new(dns.AAAA)
+		rr.Hdr = header
+		rr.AAAA = net.ParseIP(ans.Data)
+		return rr
+	case 257: // CAA
+		rr := new(dns.CAA)
+		rr.Hdr = header
+		data := strings.Split(ans.Data, " ")
+		flags, _ := strconv.ParseUint(data[0], 10, 8)
+		rr.Flag = uint8(flags)
+		rr.Tag = data[1]
+		rr.Value = strings.Trim(data[2], "\"")
 		return rr
 	default:
 		rr := new(dns.TXT)
 		rr.Hdr = header
-		cleanedData := strings.Trim(ans.Data, "\"") // 去掉引号
+		cleanedData := strings.Trim(ans.Data, "\"")
 		rr.Txt = []string{cleanedData}
 		return rr
 	}
