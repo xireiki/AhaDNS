@@ -1,4 +1,4 @@
-module main
+module github.com/xireiki/ahadns
 
 go 1.23.0
 

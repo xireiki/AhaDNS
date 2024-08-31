@@ -1,19 +1,31 @@
-.PHONY : build clean build_android_arm64 build_linux_amd64 build_windows_amd64 build_darwin_amd64
+NAME = ahadns
+COMMIT = $(shell git rev-parse --short HEAD)
 
-build: build_android_arm64 build_linux_amd64 build_windows_amd64 build_darwin_amd64
-	@echo All Done
+GOHOSTOS = $(shell go env GOHOSTOS)
+GOHOSTARCH = $(shell go env GOHOSTARCH)
 
-build_android_arm64:
-	GOOS=android GOARCH=arm64 go build -o aha-android-arm64
+PARAMS = -v -trimpath
+MAIN = .
+PREFIX ?= $(shell go env GOPATH)
 
-build_linux_amd64:
-	GOOS=linux GOARCH=amd64 go build -o aha-linux-amd64
+.PHONY : build clean build_all
 
-build_windows_amd64:
-	GOOS=windows GOARCH=amd64 go build -o aha-windows-amd64.exe
+OSList = linux windows darwin android freebsd
+ArchList = arm64 amd64
 
-build_darwin_amd64:
-	GOOS=darwin GOARCH=amd64 go build -o aha-darwin-amd64
+build:
+	go build $(PARAMS) $(MAIN)
+
+install:
+	go build -o $(PREFIX)/bin/$(NAME) $(PARAMS) $(MAIN)
+
+build_all:
+	@for os in $(OSList); do \
+		for arch in $(ArchList); do \
+			echo "Building for $$os/$$arch..."; \
+			GOOS=$$os GOARCH=$$arch go build $(PARAMS) -o $(NAME)-$$os-$$arch $(MAIN); \
+		done; \
+	done
 
 clean:
-	@rm -rf aha-*
+	@rm -rf ahadns-*

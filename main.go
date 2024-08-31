@@ -28,7 +28,7 @@ var (
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "aha",
+		Use:   "AhaDNS",
 		Short: "阿里云递归（公共）HTTP DNS 客户端",
 		Run: func(cmd *cobra.Command, args []string) {
 			err := run()
