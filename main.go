@@ -38,7 +38,7 @@ var (
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "ArashiDNS-Aha",
+		Use:   "aha",
 		Short: "阿里云递归（公共）HTTP DNS 客户端",
 		Run: func(cmd *cobra.Command, args []string) {
 			dns.HandleFunc(".", handleDNSQuery)

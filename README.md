@@ -1,12 +1,12 @@
-# ArashiDNS.Aha-Go / 阿哈
+# Aha-Go
 ----------
 阿里云递归解析（公共DNS）HTTP DNS 客户端
 ----------
 
-## Build from Source
+## Build
 ```
-git clone https://github.com/xireiki/ArashiDNS.Aha-Go
-cd ArashiDNS.Aha-go
+git clone https://github.com/xireiki/Aha-Go
+cd Aha-go
 make build
 ```
 
@@ -17,11 +17,11 @@ make build
 
 ## Usage
 ```
-ArashiDNS.Aha-Go - 阿里云递归（公共）HTTP DNS 客户端
+Aha-Go - 阿里云递归（公共）HTTP DNS 客户端
 Copyright (c) 2024 XiReiki. Code released under the GPL-3.0
 
 Usage:
-  ArashiDNS-Aha [flags]
+  aha [flags]
 
 Flags:
       --accessKeyID string       云解析-公共 DNS 控制台创建密钥中的 AccessKey 的 ID
@@ -43,6 +43,6 @@ Flags:
 
 ## License
 
-Copyright (c) 2024 XiReiki. Code released under the [GPL-3.0](https://github.com/xireiki/ArashiDNS.Aha-go/blob/main/LICENSE). 
+Copyright (c) 2024 XiReiki. Code released under the [GPL-3.0](https://github.com/xireiki/Aha-go/blob/main/LICENSE). 
 
-<sup>ArashiDNS-Go™ is a trademark of XiReiki.</sup>
+<sup>Aha-Go™ is a trademark of XiReiki.</sup>
