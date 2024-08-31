@@ -24,7 +24,15 @@ var (
 	accountID       string
 	accessKeySecret string
 	accessKeyID     string
-	listenAddress   = ":53"
+	listenUDP       bool
+	listenTCP       bool
+	listenTLS       bool
+	listen          = "[::]"
+	listenTCPPort   = 53
+	listenUDPPort   = 53
+	listenTLSPort   = 853
+	tlsCertPath     string
+	tlsKeyPath      string
 	timeout         time.Duration = 3 * time.Second
 )
 
@@ -34,10 +42,37 @@ func main() {
 		Short: "阿里云递归（公共）HTTP DNS 客户端",
 		Run: func(cmd *cobra.Command, args []string) {
 			dns.HandleFunc(".", handleDNSQuery)
+
 			var servers []*dns.Server
-			servers = append(servers, UDPDNS(listenAddress))
-			servers = append(servers, TCPDNS(listenAddress))
-			fmt.Printf("Now listening on: %s\n", listenAddress)
+			if listenUDP {
+				if server, err := UDPDNS(listen, listenUDPPort); err != nil {
+					log.Fatalf("Failed to start UDP server: %v\n", err)
+				} else {
+					servers = append(servers, server)
+				}
+			}
+			if listenTCP {
+				if server, err := TCPDNS(listen, listenTCPPort); err != nil {
+					log.Fatalf("Failed to start TCP server: %v\n", err)
+				} else {
+					servers = append(servers, server)
+				}
+			}
+			if listenTLS {
+				if tlsCertPath == "" {
+					log.Fatalf("TLS certificate path is not set")
+				}
+				if tlsKeyPath == "" {
+					log.Fatalf("TLS key path is not set")
+				}
+				if server, err := TLSDNS(listen, listenTLSPort, tlsCertPath, tlsKeyPath); err != nil {
+					log.Fatalf("Failed to start TLS server: %v\n", err)
+				} else {
+					servers = append(servers, server)
+				}
+			}
+
+			fmt.Printf("Now listening on: %s\n", listen)
 			fmt.Println("Application started. Press Ctrl+C to shut down.")
 
 			for _, server := range servers {
@@ -64,7 +99,15 @@ func main() {
 	rootCmd.Flags().StringVar(&accessKeyID, "accessKeyID", "", "云解析-公共 DNS 控制台创建密钥中的 AccessKey 的 ID")
 	rootCmd.MarkFlagRequired("accessKeyID")
 	rootCmd.Flags().StringVar(&server, "server", "223.5.5.5", "设置的服务器的地址")
-	rootCmd.Flags().StringVar(&listenAddress, "listen", ":53", "监听的地址与端口")
+	rootCmd.Flags().StringVar(&listen, "listen", "[::]", "监听的地址")
+	rootCmd.Flags().BoolVar(&listenUDP, "udp", false, "启用 UDP DNS 服务器")
+	rootCmd.Flags().BoolVar(&listenTCP, "tcp", false, "启用 TCP DNS 服务器")
+	rootCmd.Flags().BoolVar(&listenTLS, "tls", false, "启用 TLS DNS 服务器")
+	rootCmd.Flags().IntVar(&listenUDPPort, "listenUDPPort", 53, "UDP 监听的端口")
+	rootCmd.Flags().IntVar(&listenTCPPort, "listenTCPPort", 53, "TCP 监听的端口")
+	rootCmd.Flags().IntVar(&listenTLSPort, "listenTLSPort", 853, "DoT 监听的地址")
+	rootCmd.Flags().StringVar(&tlsCertPath, "tlsCert", "", "TLS 证书路径")
+	rootCmd.Flags().StringVar(&tlsKeyPath, "tlsKey", "", "TLS 私钥路径")
 	rootCmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "等待回复的超时时间")
 
 	if err := rootCmd.Execute(); err != nil {
