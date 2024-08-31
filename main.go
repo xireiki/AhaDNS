@@ -156,7 +156,14 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 
 	for _, q := range r.Question {
 		switch q.Qtype {
-		case dns.TypeA, dns.TypeAAAA, dns.TypeCNAME, dns.TypeNS, dns.TypeTXT, dns.TypeMX, dns.TypeCAA:
+		case dns.TypeA,
+				 dns.TypeAAAA,
+				 dns.TypeCNAME,
+				 dns.TypeNS,
+				 dns.TypeTXT,
+				 dns.TypeMX,
+				 dns.TypeCAA,
+				 dns.TypeSOA:
 			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String())
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
@@ -214,6 +221,12 @@ func queryHTTPDNS(options *Options, name string, qtype string) (*DNSEntity, erro
 	return &result, err
 }
 
+func string2int(str string) int {
+	// unsafe
+	i, _ := strconv.Atoi(str)
+	return i
+}
+
 func getDNSRecord(ans Answer) dns.RR {
 	header := dns.RR_Header{Name: ans.Name, Rrtype: uint16(ans.Type), Class: dns.ClassINET, Ttl: uint32(ans.TTL)}
 	switch ans.Type {
@@ -232,12 +245,23 @@ func getDNSRecord(ans Answer) dns.RR {
 		rr.Hdr = header
 		rr.Target = ans.Data
 		return rr
+	case 6: // SOA
+		rr := new(dns.SOA)
+		rr.Hdr = header
+		data := strings.Split(ans.Data, " ")
+		rr.Ns = data[0]
+		rr.Mbox = data[1]
+		rr.Serial = uint32(string2int(data[2]))
+		rr.Refresh = uint32(string2int(data[3]))
+		rr.Retry = uint32(string2int(data[4]))
+		rr.Expire = uint32(string2int(data[5]))
+		rr.Minttl = uint32(string2int(data[6]))
+		return rr
 	case 15: // MX
 		rr := new(dns.MX)
 		rr.Hdr = header
 		data := strings.Split(ans.Data, " ")
-		pref, _ := strconv.ParseUint(data[0], 10, 16)
-		rr.Preference = uint16(pref)
+		rr.Preference = uint16(string2int(data[0]))
 		rr.Mx = data[1]
 		return rr
 	case 16: // TXT
@@ -255,8 +279,7 @@ func getDNSRecord(ans Answer) dns.RR {
 		rr := new(dns.CAA)
 		rr.Hdr = header
 		data := strings.Split(ans.Data, " ")
-		flags, _ := strconv.ParseUint(data[0], 10, 8)
-		rr.Flag = uint8(flags)
+		rr.Flag = uint8(string2int(data[0]))
 		rr.Tag = data[1]
 		rr.Value = strings.Trim(data[2], "\"")
 		return rr
