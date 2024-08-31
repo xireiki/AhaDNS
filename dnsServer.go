@@ -3,27 +3,38 @@ package main
 import (
 	"crypto/tls"
 	"github.com/miekg/dns"
-	"strconv"
 )
 
-func UDPDNS(Listen string, ListenPort int) (*dns.Server, error) {
+func UDPDNS(Listen string, ListenPort uint16) (*dns.Server, error) {
+	address, err := JoinIPPort(Listen, int(ListenPort))
+	if err != nil {
+		return nil, err
+	}
 	return &dns.Server{
-		Addr: Listen + ":" + strconv.Itoa(ListenPort),
-		Net: "udp",
+		Addr: address,
+		Net:  "udp",
 	}, nil
 }
 
-func TCPDNS(Listen string, ListenPort int) (*dns.Server, error) {
+func TCPDNS(Listen string, ListenPort uint16) (*dns.Server, error) {
+	address, err := JoinIPPort(Listen, int(ListenPort))
+	if err != nil {
+		return nil, err
+	}
 	return &dns.Server{
-		Addr: Listen + ":" + strconv.Itoa(ListenPort),
+		Addr: address,
 		Net: "tcp",
 	}, nil
 }
 
-func TLSDNS(Listen string, ListenPort int, certPath string, keyPath string) (*dns.Server, error) {
+func TLSDNS(Listen string, ListenPort uint16, certPath string, keyPath string) (*dns.Server, error) {
+	address, err := JoinIPPort(Listen, int(ListenPort))
+	if err != nil {
+		return nil, err
+	}
 	dnsServer := &dns.Server{
-		Addr:    Listen + ":" + strconv.Itoa(ListenPort),
-		Net:     "tcp-tls",
+		Addr: address,
+		Net:  "tcp-tls",
 	}
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {

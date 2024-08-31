@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -20,20 +21,9 @@ import (
 )
 
 var (
-	server          = "223.5.5.5"
-	accountID       string
-	accessKeySecret string
-	accessKeyID     string
-	listenUDP       bool
-	listenTCP       bool
-	listenTLS       bool
-	listen          = "[::]"
-	listenTCPPort   = 53
-	listenUDPPort   = 53
-	listenTLSPort   = 853
-	tlsCertPath     string
-	tlsKeyPath      string
-	timeout         time.Duration = 3 * time.Second
+	configPath      string
+	workerDir       string
+	options         = &Options{}
 )
 
 func main() {
@@ -41,78 +31,121 @@ func main() {
 		Use:   "aha",
 		Short: "阿里云递归（公共）HTTP DNS 客户端",
 		Run: func(cmd *cobra.Command, args []string) {
-			dns.HandleFunc(".", handleDNSQuery)
-
-			var servers []*dns.Server
-			if listenUDP {
-				if server, err := UDPDNS(listen, listenUDPPort); err != nil {
-					log.Fatalf("Failed to start UDP server: %v\n", err)
-				} else {
-					servers = append(servers, server)
-				}
-			}
-			if listenTCP {
-				if server, err := TCPDNS(listen, listenTCPPort); err != nil {
-					log.Fatalf("Failed to start TCP server: %v\n", err)
-				} else {
-					servers = append(servers, server)
-				}
-			}
-			if listenTLS {
-				if tlsCertPath == "" {
-					log.Fatalf("TLS certificate path is not set")
-				}
-				if tlsKeyPath == "" {
-					log.Fatalf("TLS key path is not set")
-				}
-				if server, err := TLSDNS(listen, listenTLSPort, tlsCertPath, tlsKeyPath); err != nil {
-					log.Fatalf("Failed to start TLS server: %v\n", err)
-				} else {
-					servers = append(servers, server)
-				}
-			}
-
-			fmt.Printf("Now listening on: %s\n", listen)
-			fmt.Println("Application started. Press Ctrl+C to shut down.")
-
-			for _, server := range servers {
-				go func() {
-					if err := server.ListenAndServe(); err != nil {
-						log.Fatalf("Failed to start server: %v\n", err)
-					}
-				}()
-			}
-
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-			<-sigChan
-			for _, server := range servers {
-				server.Shutdown()
+			err := run()
+			if err != nil {
+				log.Fatal(err)
 			}
 		},
 	}
 
-	rootCmd.Flags().StringVar(&accountID, "accountID", "", "云解析-公共 DNS 控制台的 Account ID")
-	rootCmd.MarkFlagRequired("accountID")
-	rootCmd.Flags().StringVar(&accessKeySecret, "accessKeySecret", "", "云解析-公共 DNS 控制台创建密钥中的 AccessKey 的 Secret")
-	rootCmd.MarkFlagRequired("accessKeySecret")
-	rootCmd.Flags().StringVar(&accessKeyID, "accessKeyID", "", "云解析-公共 DNS 控制台创建密钥中的 AccessKey 的 ID")
-	rootCmd.MarkFlagRequired("accessKeyID")
-	rootCmd.Flags().StringVar(&server, "server", "223.5.5.5", "设置的服务器的地址")
-	rootCmd.Flags().StringVar(&listen, "listen", "[::]", "监听的地址")
-	rootCmd.Flags().BoolVar(&listenUDP, "udp", false, "启用 UDP DNS 服务器")
-	rootCmd.Flags().BoolVar(&listenTCP, "tcp", false, "启用 TCP DNS 服务器")
-	rootCmd.Flags().BoolVar(&listenTLS, "tls", false, "启用 TLS DNS 服务器")
-	rootCmd.Flags().IntVar(&listenUDPPort, "listenUDPPort", 53, "UDP 监听的端口")
-	rootCmd.Flags().IntVar(&listenTCPPort, "listenTCPPort", 53, "TCP 监听的端口")
-	rootCmd.Flags().IntVar(&listenTLSPort, "listenTLSPort", 853, "DoT 监听的地址")
-	rootCmd.Flags().StringVar(&tlsCertPath, "tlsCert", "", "TLS 证书路径")
-	rootCmd.Flags().StringVar(&tlsKeyPath, "tlsKey", "", "TLS 私钥路径")
-	rootCmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "等待回复的超时时间")
+	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "配置文件")
+	rootCmd.MarkFlagRequired("config")
+	rootCmd.Flags().StringVarP(&workerDir, "directory", "D", "", "工作目录")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func run() error {
+	options, err := readConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if workerDir != "" {
+		_, err = os.Stat(workerDir)
+		if err != nil {
+			os.Mkdir(workerDir, 0o777)
+		}
+		err = os.Chdir(workerDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	dns.HandleFunc(".", handleDNSQuery)
+	var servers []*dns.Server
+	if options.DNS.UDPOption.Enabled {
+		if server, err := UDPDNS(options.DNS.UDPOption.Listen, options.DNS.UDPOption.ListenPort); err != nil {
+			return fmt.Errorf("Failed to start UDP server: %v\n", err)
+		} else {
+			servers = append(servers, server)
+		}
+	}
+	if options.DNS.TCPOption.Enabled {
+		if server, err := TCPDNS(options.DNS.TCPOption.Listen, options.DNS.TCPOption.ListenPort); err != nil {
+			return fmt.Errorf("Failed to start TCP server: %v\n", err)
+		} else {
+			servers = append(servers, server)
+		}
+	}
+	if options.DNS.TLSOption.Enabled {
+		if !options.TLS.Enabled {
+			return fmt.Errorf("TLS options are not enabled")
+		}
+		if options.TLS.CertPath == "" {
+			return fmt.Errorf("TLS certificate path is not set")
+		}
+		if options.TLS.KeyPath == "" {
+			return fmt.Errorf("TLS key path is not set")
+		}
+		if server, err := TLSDNS(options.DNS.TLSOption.Listen, options.DNS.TLSOption.ListenPort, options.TLS.CertPath, options.TLS.KeyPath); err != nil {
+			return fmt.Errorf("Failed to start TLS server: %v\n", err)
+		} else {
+			servers = append(servers, server)
+		}
+	}
+
+	fmt.Println("Application started. Press Ctrl+C to shut down.")
+
+	for _, server := range servers {
+		go func() {
+			if err := server.ListenAndServe(); err != nil {
+				log.Fatalf("Failed to start server: %v\n", err)
+			}
+		}()
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	for _, server := range servers {
+		server.Shutdown()
+	}
+	return nil
+}
+
+func readConfig(path string) (*Options, error) {
+	var (
+		configContent []byte
+		err           error
+	)
+	if path == "stdin" {
+		configContent, err = io.ReadAll(os.Stdin)
+	} else {
+		configContent, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%v: read config at %s", err, path)
+	}
+	err = options.UnmarshalJSON(configContent)
+	if err != nil {
+		return nil, fmt.Errorf("%v: decode config at %s", err, path)
+	}
+	return options, nil
+}
+
+func JoinIPPort(ip string, port int) (string, error) {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return "", fmt.Errorf("invalid IP address")
+	}
+
+	if parsedIP.To4() == nil { // 是 IPv6 地址
+		return fmt.Sprintf("[%s]:%d", ip, port), nil
+	}
+
+	return fmt.Sprintf("%s:%d", ip, port), nil
 }
 
 func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
@@ -123,7 +156,7 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	for _, q := range r.Question {
 		switch q.Qtype {
 		case dns.TypeA, dns.TypeAAAA, dns.TypeCNAME, dns.TypeNS, dns.TypeTXT:
-			answer, err := queryHTTPDNS(q.Name, dns.Type(q.Qtype).String())
+			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String())
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
 			} else {
@@ -139,11 +172,11 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(&msg)
 }
 
-func queryHTTPDNS(name, qtype string) (*DNSEntity, error) {
+func queryHTTPDNS(options *Options, name string, qtype string) (*DNSEntity, error) {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
-	key := sha256.Sum256([]byte(accountID + accessKeySecret + ts + name + accessKeyID))
+	key := sha256.Sum256([]byte(options.API.AccountID + options.API.AccessKeySecret + ts + name + options.API.AccessKeyID))
 	keyStr := hex.EncodeToString(key[:])
-	url := fmt.Sprintf("http://%s/resolve?name=%s&type=%s&uid=%s&ak=%s&key=%s&ts=%s", server, name, qtype, accountID, accessKeyID, keyStr, ts)
+	url := fmt.Sprintf("http://%s/resolve?name=%s&type=%s&uid=%s&ak=%s&key=%s&ts=%s", options.Server, name, qtype, options.API.AccountID, options.API.AccessKeyID, keyStr, ts)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
