@@ -154,6 +154,17 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	msg.SetReply(r)
 	msg.Authoritative = true
 
+	var edns string
+	for _, opt := range r.Extra {
+		if edns0, ok := opt.(*dns.OPT); ok {
+			for _, option := range edns0.Option {
+				if ecs, ok := option.(*dns.EDNS0_SUBNET); ok {
+					edns = ecs.Address.String() + "/" + strconv.Itoa(int(ecs.SourceNetmask))
+				}
+			}
+		}
+	}
+
 	for _, q := range r.Question {
 		switch q.Qtype {
 		case dns.TypeA,
@@ -164,7 +175,7 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 				 dns.TypeMX,
 				 dns.TypeCAA,
 				 dns.TypeSOA:
-			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String())
+			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String(), edns)
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
 				fmt.Println(err)
@@ -180,11 +191,11 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(&msg)
 }
 
-func queryRawDNS(options *Options, name string) (*dns.Msg, error) {
+func queryRawDNS(options *Options, name string, qtype uint16) (*dns.Msg, error) {
 	dnsClient := new(dns.Client)
 
 	msg := new(dns.Msg)
-	msg.SetQuestion(dns.Fqdn(name), dns.TypeMX)
+	msg.SetQuestion(dns.Fqdn(name), qtype)
 	msg.RecursionDesired = true
 
 	serverAddress, err := JoinIPPort(options.Server.Address, options.Server.UDPPort)
@@ -202,11 +213,14 @@ func queryRawDNS(options *Options, name string) (*dns.Msg, error) {
 	return r, nil
 }
 
-func queryHTTPDNS(options *Options, name string, qtype string) (*DNSEntity, error) {
+func queryHTTPDNS(options *Options, name string, qtype string, edns string) (*DNSEntity, error) {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	key := sha256.Sum256([]byte(options.API.AccountID + options.API.AccessKeySecret + ts + name + options.API.AccessKeyID))
 	keyStr := hex.EncodeToString(key[:])
 	url := fmt.Sprintf("http://%s/resolve?name=%s&type=%s&uid=%s&ak=%s&key=%s&ts=%s", options.Server.Address, name, qtype, options.API.AccountID, options.API.AccessKeyID, keyStr, ts)
+	if edns != "" {
+		url = fmt.Sprintf("%s&edns_client_subnet=%s", url, edns)
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
