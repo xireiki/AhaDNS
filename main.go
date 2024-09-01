@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
+	"github.com/xireiki/ahadns/log"
 	"net"
 	"net/http"
 	"os"
@@ -46,6 +46,7 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
+	log.Info("AhaDNS is stopped.")
 }
 
 func run() error {
@@ -64,23 +65,35 @@ func run() error {
 		}
 	}
 
+	if options.Log.Enabled {
+		err := log.SetLevel(options.Log.Level)
+		if err != nil {
+			return err
+		}
+	}
+
 	dns.HandleFunc(".", handleDNSQuery)
 	var servers []*dns.Server
 	if options.DNS.UDPOption.Enabled {
+		log.Debug("Start loading UDP DNS server.")
 		if server, err := UDPDNS(options.DNS.UDPOption.Listen, options.DNS.UDPOption.ListenPort); err != nil {
 			return fmt.Errorf("Failed to start UDP server: %v\n", err)
 		} else {
 			servers = append(servers, server)
 		}
+		log.Debug("UDP DNS server loaded.")
 	}
 	if options.DNS.TCPOption.Enabled {
+		log.Debug("Start loading TCP DNS server.")
 		if server, err := TCPDNS(options.DNS.TCPOption.Listen, options.DNS.TCPOption.ListenPort); err != nil {
 			return fmt.Errorf("Failed to start TCP server: %v\n", err)
 		} else {
 			servers = append(servers, server)
 		}
+		log.Debug("TCP DNS server loaded.")
 	}
 	if options.DNS.TLSOption.Enabled {
+		log.Debug("Start loading TLS DNS server.")
 		if !options.TLS.Enabled {
 			return fmt.Errorf("TLS options are not enabled")
 		}
@@ -95,10 +108,10 @@ func run() error {
 		} else {
 			servers = append(servers, server)
 		}
+		log.Debug("TLS DNS server loaded.")
 	}
 
-	fmt.Println("Application started. Press Ctrl+C to shut down.")
-
+	log.Debug("Start listening to all servers")
 	for _, server := range servers {
 		go func() {
 			if err := server.ListenAndServe(); err != nil {
@@ -150,10 +163,12 @@ func JoinIPPort[T int | uint16](ip string, port T) (string, error) {
 }
 
 func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
+	log.Debug("Start processing DNS request")
 	msg := dns.Msg{}
 	msg.SetReply(r)
 	msg.Authoritative = true
 
+	log.Debug("Check the ECS")
 	var edns string
 	for _, opt := range r.Extra {
 		if edns0, ok := opt.(*dns.OPT); ok {
@@ -165,6 +180,7 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
+	log.Debug("Start Processing Question")
 	for _, q := range r.Question {
 		switch q.Qtype {
 		case dns.TypeA,
@@ -175,13 +191,18 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 				 dns.TypeMX,
 				 dns.TypeCAA,
 				 dns.TypeSOA:
+			log.Debugf("Querying domain: %s, type: %s", q.Name, dns.Type(q.Qtype).String())
 			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String(), edns)
+			log.Debugf("Domain %s query result: %s", q.Name, answer)
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
-				fmt.Println(err)
+				log.Error(err)
 			} else {
+				log.Trace("Start traversing query result")
 				for _, ans := range answer.Answer {
+					log.Trace("Convert Answer in JSON API request result to DNS Answer")
 					record := getDNSRecord(ans)
+					log.Tracef("Conversion completed: %s", ans)
 					msg.Answer = append(msg.Answer, record)
 				}
 			}
@@ -189,6 +210,7 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	w.WriteMsg(&msg)
+	log.Trace("Return Result")
 }
 
 func queryRawDNS(options *Options, name string, qtype uint16) (*dns.Msg, error) {
@@ -221,6 +243,7 @@ func queryHTTPDNS(options *Options, name string, qtype string, edns string) (*DN
 	if edns != "" {
 		url = fmt.Sprintf("%s&edns_client_subnet=%s", url, edns)
 	}
+	log.Trace("Requesting AliDNS JSON API")
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -230,6 +253,7 @@ func queryHTTPDNS(options *Options, name string, qtype string, edns string) (*DN
 	if err != nil {
 		return nil, err
 	}
+	log.Tracef("Get the result: %s", string(body))
 	var result DNSEntity
 	err = json.Unmarshal(body, &result)
 	return &result, err

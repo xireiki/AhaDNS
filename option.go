@@ -7,6 +7,7 @@ import (
 
 type _Options struct {
 	API    APIOptions    `json:"api"`
+	Log    LogOptions    `json:"log"`
 	Server ServerOptions `json:"server"`
 	DNS    DNSOptions    `json:"dns"`
 	TLS    TLSOptions    `json:"tls"`
@@ -52,6 +53,11 @@ type APIOptions struct {
 	AccessKeyID     string       `json:"access_key_id"`
 	AccessKeySecret string       `json:"access_key_secret"`
 	ExtraOptions    ExtraOptions `json:"extra"`
+}
+
+type LogOptions struct {
+	Enabled bool   `json:"enabled"`
+	Level   string `json:"level"`
 }
 
 type ServerOptions struct {
