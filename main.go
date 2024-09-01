@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"github.com/xireiki/ahadns/log"
 	"net"
 	"net/http"
 	"os"
@@ -19,12 +18,14 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
+	L "github.com/xireiki/ahadns/log"
 )
 
 var (
-	configPath      string
-	workerDir       string
-	options         = &Options{}
+	configPath string
+	workerDir  string
+	options    = &Options{}
+	log        *L.Log
 )
 
 func main() {
@@ -50,6 +51,7 @@ func main() {
 }
 
 func run() error {
+	log = L.New()
 	options, err := readConfig(configPath)
 	if err != nil {
 		return err
@@ -66,7 +68,7 @@ func run() error {
 	}
 
 	if options.Log.Enabled {
-		err := log.SetLevel(options.Log.Level)
+		err := L.SetLevel(options.Log.Level)
 		if err != nil {
 			return err
 		}
@@ -163,6 +165,7 @@ func JoinIPPort[T int | uint16](ip string, port T) (string, error) {
 }
 
 func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
+	log := L.New()
 	log.Debug("Start processing DNS request")
 	msg := dns.Msg{}
 	msg.SetReply(r)
@@ -192,7 +195,7 @@ func handleDNSQuery(w dns.ResponseWriter, r *dns.Msg) {
 				 dns.TypeCAA,
 				 dns.TypeSOA:
 			log.Debugf("Querying domain: %s, type: %s", q.Name, dns.Type(q.Qtype).String())
-			answer, err := queryHTTPDNS(options, q.Name, dns.Type(q.Qtype).String(), edns)
+			answer, err := queryHTTPDNS(log, options, q.Name, dns.Type(q.Qtype).String(), edns)
 			log.Debugf("Domain %s query result: %s", q.Name, answer)
 			if err != nil || answer.Status != 0 {
 				msg.Rcode = dns.RcodeServerFailure
@@ -235,7 +238,7 @@ func queryRawDNS(options *Options, name string, qtype uint16) (*dns.Msg, error) 
 	return r, nil
 }
 
-func queryHTTPDNS(options *Options, name string, qtype string, edns string) (*DNSEntity, error) {
+func queryHTTPDNS(log *L.Log, options *Options, name string, qtype string, edns string) (*DNSEntity, error) {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	key := sha256.Sum256([]byte(options.API.AccountID + options.API.AccessKeySecret + ts + name + options.API.AccessKeyID))
 	keyStr := hex.EncodeToString(key[:])
